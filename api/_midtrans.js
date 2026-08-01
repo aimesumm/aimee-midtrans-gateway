@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import QRCode from 'qrcode'
 
 const DEFAULT_BASE_URL = 'https://api.sandbox.midtrans.com'
 
@@ -52,8 +53,6 @@ async function qrStringToDataUrl(qrString) {
   if (!value) return ''
 
   try {
-    const qrcodeModule = await import('qrcode')
-    const QRCode = qrcodeModule.default || qrcodeModule
     if (!QRCode?.toDataURL) return ''
     return await QRCode.toDataURL(value, {
       errorCorrectionLevel: 'M',
@@ -89,7 +88,7 @@ export async function resolveQrisImageUrl(data = {}) {
   }
 
   const qrString =
-    String(data.qr_string || data.qris?.qr_string || data.transaction_id || '').trim()
+    String(data.qr_string || data.qris?.qr_string || '').trim()
 
   if (qrString) {
     const dataUrl = await qrStringToDataUrl(qrString)
@@ -157,18 +156,25 @@ export async function createMidtransQrisCharge(order = {}) {
     throw error
   }
 
-  const qrisLink = await resolveQrisImageUrl(data)
+  let qrisLink = await resolveQrisImageUrl(data)
+
   if (!qrisLink) {
-    const error = new Error('Midtrans QRIS QR image is unavailable')
-    error.details = data
-    throw error
+    qrisLink = await qrStringToDataUrl(data.qr_string || data.qris?.qr_string || '')
+  }
+
+  if (!qrisLink) {
+    console.warn('[MIDTRANS] QR image URL is unavailable, returning qr_string fallback only', {
+      orderId,
+      hasActions: Array.isArray(data.actions) && data.actions.length > 0,
+      hasQrString: Boolean(data.qr_string || data.qris?.qr_string),
+    })
   }
 
   return {
     ...data,
     qris: {
       ...(data.qris || {}),
-      link_qris: qrisLink,
+      link_qris: qrisLink || String(data.actions?.[0]?.url || ''),
       qr_string: String(data.qr_string || data.qris?.qr_string || ''),
       nominal: String(data.gross_amount || grossAmount),
       status: String(data.transaction_status || 'pending'),
