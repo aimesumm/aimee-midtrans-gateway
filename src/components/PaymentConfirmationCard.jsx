@@ -1,42 +1,29 @@
 import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import QRCode from 'qrcode'
 import { currency } from '../data/siteConfig'
 import OrderSummary from './OrderSummary'
 
+function buildQrisImage(qris) {
+  const link = String(qris?.link_qris || '').trim()
+  if (link) return link
+
+  const qrString = String(qris?.qr_string || '').trim()
+  if (!qrString) return ''
+
+  return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(qrString)}`
+}
+
 function QrisPreview({ qris, orderId, total, countdown, generating, error, onRetry }) {
   const nominal = Number(qris?.nominal ?? total ?? 0)
-  const [imageSrc, setImageSrc] = useState(qris?.link_qris || '')
+  const [imageSrc, setImageSrc] = useState(() => buildQrisImage(qris))
 
   useEffect(() => {
     let cancelled = false
 
-    const buildFallback = async () => {
-      if (qris?.link_qris) {
-        setImageSrc(qris.link_qris)
-        return
-      }
-
-      const qrString = String(qris?.qr_string || '').trim()
-      if (!qrString) return
-
-      try {
-        if (!QRCode?.toDataURL) return
-        const dataUrl = await QRCode.toDataURL(qrString, {
-          errorCorrectionLevel: 'M',
-          margin: 1,
-          scale: 8,
-          type: 'image/png',
-        })
-        if (!cancelled && dataUrl) {
-          setImageSrc(dataUrl)
-        }
-      } catch {
-        // keep empty so the UI can show the existing error state
-      }
+    const nextImage = buildQrisImage(qris)
+    if (!cancelled) {
+      setImageSrc(nextImage)
     }
-
-    buildFallback()
 
     return () => {
       cancelled = true
@@ -133,7 +120,12 @@ export default function PaymentConfirmationCard({
       )}
 
       <div className="confirm-actions">
-        <button className="primary-btn checkout-continue confirm-order-btn" type="button" onClick={onConfirm} disabled={checking || attemptsLeft <= 0}>
+        <button
+          className="primary-btn checkout-continue confirm-order-btn"
+          type="button"
+          onClick={onConfirm}
+          disabled={checking || attemptsLeft <= 0}
+        >
           {checking ? 'Mengecek...' : attemptsLeft > 0 ? `Konfirmasi Pesanan (${attemptsLeft})` : 'Tiket habis'}
         </button>
       </div>
