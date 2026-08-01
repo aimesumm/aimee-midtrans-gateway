@@ -1,19 +1,56 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import QRCode from 'qrcode'
 import { currency } from '../data/siteConfig'
 import OrderSummary from './OrderSummary'
 
 function QrisPreview({ qris, orderId, total, countdown, generating, error, onRetry }) {
   const nominal = Number(qris?.nominal ?? total ?? 0)
+  const [imageSrc, setImageSrc] = useState(qris?.link_qris || '')
 
-  if (!qris?.link_qris) {
+  useEffect(() => {
+    let cancelled = false
+
+    const buildFallback = async () => {
+      if (qris?.link_qris) {
+        setImageSrc(qris.link_qris)
+        return
+      }
+
+      const qrString = String(qris?.qr_string || '').trim()
+      if (!qrString) return
+
+      try {
+        if (!QRCode?.toDataURL) return
+        const dataUrl = await QRCode.toDataURL(qrString, {
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          scale: 8,
+          type: 'image/png',
+        })
+        if (!cancelled && dataUrl) {
+          setImageSrc(dataUrl)
+        }
+      } catch {
+        // keep empty so the UI can show the existing error state
+      }
+    }
+
+    buildFallback()
+
+    return () => {
+      cancelled = true
+    }
+  }, [qris?.link_qris, qris?.qr_string])
+
+  if (!imageSrc) {
     if (generating) {
       return (
         <div className="confirm-qris-box">
           <div className="payment-loader-box">
             <div className="loading-spinner" />
             <strong>Sedang membuat QRIS...</strong>
-            <p>Menunggu respons API converter QRIS.</p>
+            <p>Menunggu respons API Midtrans.</p>
           </div>
         </div>
       )
@@ -35,7 +72,7 @@ function QrisPreview({ qris, orderId, total, countdown, generating, error, onRet
   return (
     <div className="confirm-qris-box">
       <div className="confirm-qris-image-wrap">
-        <img src={qris.link_qris} alt="QRIS pembayaran" className="confirm-qris-image" />
+        <img src={imageSrc} alt="QRIS pembayaran" className="confirm-qris-image" />
       </div>
 
       <div className="confirm-qris-meta">
