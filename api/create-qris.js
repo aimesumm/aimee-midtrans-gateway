@@ -40,6 +40,7 @@ export default async function handler(req, res) {
       acquirer: String(charge?.acquirer || 'gopay'),
       currency: String(charge?.currency || 'IDR'),
       actions: Array.isArray(charge?.actions) ? charge.actions : [],
+      qr_string: String(charge?.qris?.qr_string || charge?.qr_string || ''),
       link_qris: String(charge?.qris?.link_qris || ''),
       nominal: String(charge?.qris?.nominal || total),
       generated_at: String(charge?.qris?.generated_at || new Date().toISOString()),
@@ -61,7 +62,12 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('[CREATE QRIS] FAILED', {
       message: error.message,
+      status: error.status || null,
+      details: error.details || null,
     })
-    return res.status(500).json({ message: error.message || 'Failed to generate QRIS' })
+    return res.status(500).json({
+      message: error.message || 'Failed to generate QRIS',
+      details: error.details || null,
+    })
   }
 }

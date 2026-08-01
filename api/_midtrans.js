@@ -47,12 +47,56 @@ export function buildMidtransItemDetails(order = {}) {
     .filter((item) => item.price >= 0 && item.quantity > 0)
 }
 
-export function selectQrisAction(actions = []) {
-  const normalized = Array.isArray(actions) ? actions : []
-  const preferred = normalized.find((action) => String(action?.name || '').toLowerCase() === 'generate-qr-code-v2')
-    || normalized.find((action) => String(action?.name || '').toLowerCase() === 'generate-qr-code')
-    || normalized.find((action) => String(action?.url || '').includes('/qr-code'))
-  return preferred?.url ? String(preferred.url) : ''
+async function qrStringToDataUrl(qrString) {
+  const value = String(qrString || '').trim()
+  if (!value) return ''
+
+  try {
+    const qrcodeModule = await import('qrcode')
+    const QRCode = qrcodeModule.default || qrcodeModule
+    if (!QRCode?.toDataURL) return ''
+    return await QRCode.toDataURL(value, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      scale: 8,
+      type: 'image/png',
+    })
+  } catch (error) {
+    console.warn('[MIDTRANS] Failed to convert qr_string into image', {
+      message: error?.message || String(error),
+    })
+    return ''
+  }
+}
+
+export async function resolveQrisImageUrl(data = {}) {
+  const normalizedActions = Array.isArray(data.actions) ? data.actions : []
+  const actionUrl = normalizedActions
+    .find((action) => String(action?.name || '').toLowerCase() === 'generate-qr-code-v2')
+    || normalizedActions.find((action) => String(action?.name || '').toLowerCase() === 'generate-qr-code')
+    || normalizedActions.find((action) => String(action?.url || '').includes('/qr-code'))
+    || normalizedActions.find((action) => String(action?.url || '').includes('/qris'))
+
+  if (actionUrl?.url) {
+    return String(actionUrl.url)
+  }
+
+  const directUrl =
+    String(data.qr_url || data.qris_url || data.qris?.qr_url || data.qris?.link_qris || '').trim()
+
+  if (directUrl) {
+    return directUrl
+  }
+
+  const qrString =
+    String(data.qr_string || data.qris?.qr_string || data.transaction_id || '').trim()
+
+  if (qrString) {
+    const dataUrl = await qrStringToDataUrl(qrString)
+    if (dataUrl) return dataUrl
+  }
+
+  return ''
 }
 
 export async function createMidtransQrisCharge(order = {}) {
@@ -88,21 +132,36 @@ export async function createMidtransQrisCharge(order = {}) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
       Authorization: getAuthHeader(),
     },
     body: JSON.stringify(payload),
   })
 
-  const data = await response.json().catch(() => ({}))
+  const rawText = await response.text().catch(() => '')
+  let data = {}
 
-  if (!response.ok) {
-    const message = data?.status_message || data?.message || 'Failed to create Midtrans QRIS'
-    throw new Error(message)
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText)
+    } catch {
+      data = { message: rawText }
+    }
   }
 
-  const qrisLink = selectQrisAction(data.actions)
+  if (!response.ok) {
+    const message = data?.status_message || data?.message || `Failed to create Midtrans QRIS (${response.status})`
+    const error = new Error(message)
+    error.status = response.status
+    error.details = data
+    throw error
+  }
+
+  const qrisLink = await resolveQrisImageUrl(data)
   if (!qrisLink) {
-    throw new Error('Midtrans QRIS QR image is unavailable')
+    const error = new Error('Midtrans QRIS QR image is unavailable')
+    error.details = data
+    throw error
   }
 
   return {
@@ -110,6 +169,7 @@ export async function createMidtransQrisCharge(order = {}) {
     qris: {
       ...(data.qris || {}),
       link_qris: qrisLink,
+      qr_string: String(data.qr_string || data.qris?.qr_string || ''),
       nominal: String(data.gross_amount || grossAmount),
       status: String(data.transaction_status || 'pending'),
       generated_at: new Date().toISOString(),
